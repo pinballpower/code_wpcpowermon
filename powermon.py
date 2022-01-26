@@ -64,9 +64,9 @@ def read_sol4():
 lightsmachine = rp2.StateMachine(0, read_lights, in_base=machine.Pin(0))
 solmachines = []
 solmachines.append(rp2.StateMachine(1, read_sol1, in_base=machine.Pin(0)))
-solmachines.append(rp2.StateMachine(2, read_sol1, in_base=machine.Pin(0)))
-solmachines.append(rp2.StateMachine(3, read_sol1, in_base=machine.Pin(0)))
-solmachines.append(rp2.StateMachine(4, read_sol1, in_base=machine.Pin(0)))
+solmachines.append(rp2.StateMachine(2, read_sol2, in_base=machine.Pin(0)))
+solmachines.append(rp2.StateMachine(3, read_sol3, in_base=machine.Pin(0)))
+solmachines.append(rp2.StateMachine(4, read_sol4, in_base=machine.Pin(0)))
 
 lightsmachine.active(1)
 for s in solmachines:
@@ -117,9 +117,12 @@ while True:
         
     for i in [0,1,2,3]:
         if solmachines[i].rx_fifo()>0:
-            print(i);
+#            print(i);
             c = c+1
             d = (~ solmachines[i].get() & 0xff)
+            if d != 0:
+                print(i,d)
+                
             if (sols[i] != d):
                 sols[i]=d
                 was_updated=True
