@@ -34,23 +34,59 @@ def read_sol1():
     push()
     wrap()
 
+@rp2.asm_pio()
+def read_sol2():
+    wrap_target()
+    wait(0, pin, 12).delay(1)
+    wait(1, pin, 12).delay(1)
+    in_(pins,8)
+    push()
+    wrap()
+
+@rp2.asm_pio()
+def read_sol3():
+    wrap_target()
+    wait(0, pin, 10).delay(1)
+    wait(1, pin, 10).delay(1)
+    in_(pins,8)
+    push()
+    wrap()
+
+@rp2.asm_pio()
+def read_sol4():
+    wrap_target()
+    wait(0, pin, 11).delay(1)
+    wait(1, pin, 11).delay(1)
+    in_(pins,8)
+    push()
+    wrap()
+
 lightsmachine = rp2.StateMachine(0, read_lights, in_base=machine.Pin(0))
-sol1machine = rp2.StateMachine(1, read_sol1, in_base=machine.Pin(0))
+solmachines = []
+solmachines.append(rp2.StateMachine(1, read_sol1, in_base=machine.Pin(0)))
+solmachines.append(rp2.StateMachine(2, read_sol1, in_base=machine.Pin(0)))
+solmachines.append(rp2.StateMachine(3, read_sol1, in_base=machine.Pin(0)))
+solmachines.append(rp2.StateMachine(4, read_sol1, in_base=machine.Pin(0)))
 
 lightsmachine.active(1)
-sol1machine.active(1)
+for s in solmachines:
+ s.active(1)
 
 print ("State machine started")
 
 lights = bytearray(8)
 sols=bytearray(4)
 
-i=0
+c=0
 t1=utime.ticks_ms()
 t2=0
 while True:
+    was_updated=False
+    lights_updates=False
+    sols_updated=False
+    
     if lightsmachine.rx_fifo()>=0:
-        i = i+1
+        c = c+1
     #    print(i)
         d=lightsmachine.get()
         rowcode = (d & 0xff00) >> 8
@@ -73,21 +109,34 @@ while True:
             r=7
 
         if r != -1:
-            lights[r]=(~d & 0xff)
+            l=(~d & 0xff)
+            if lights[r] != l:
+                lights[r] = l
+                was_updated=True
+                lights_updates=True
         
-#    if sol1machine.rx_fifo()>0:
-#        i = i+1000
-#        sols[0]=(~ sol1machine.get() & 0xff)
-#        if (sols[0])>0:
-#            i = i+1000
+    for i in [0,1,2,3]:
+        if solmachines[i].rx_fifo()>0:
+            print(i);
+            c = c+1
+            d = (~ solmachines[i].get() & 0xff)
+            if (sols[i] != d):
+                sols[i]=d
+                was_updated=True
+                sols_updated=True
+                
+    if was_updated:
+        pass
+        #print("Lights: ",lights)
+        #print("Solenoids: ", sols)
+
+    if sols_updated:
+        print("Solenoids: ", sols)
              
-    if i>=1000:
-        
+    if c>=1000:
         t2=utime.ticks_ms()
         diff=utime.ticks_diff(t2,t1)
         f=1000000.0/diff
         print(f)
-        print("Lights: ",lights)
-        print("Solenoids: ", sols)
-        i=0
+        c=0
         t1=t2
