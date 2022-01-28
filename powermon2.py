@@ -46,15 +46,15 @@ def wait_clock():
 
     label ("allhigh")        # Wait until one of the signals changes to low
     mov(isr,invert(null))    # Reset ISR shift counter, set all bits to 1
-    in_(pins,6)              # Read 7 bits
+    in_(pins,6)              # Read 6 bits
     mov(x,invert(isr))       # move these 8 bits (and the other 24) to X
     jmp(x_dec, "allhigh")    # if X is zero, loop again
     mov(isr,x)
 
     label("isnotzero")       # Now wait until it goes back to H again (should take only 250ns) 
     mov(isr,invert(null))    # Reset ISR shift counter, set all bits to 1
-    in_(pins,6)              # Read 7 bits
-    mov(x,invert(isr))       # move these 7 bits to X and invert it
+    in_(pins,6)              # Read 6 bits
+    mov(x,invert(isr))       # move these 6 bits to X and invert it
     jmp(not_x, "isnotzero")  # if X is not zero, try again
 
     irq(0)                   # signal the data reader machine to read the data on the bus
@@ -75,10 +75,10 @@ print ("State machines started")
 lights = bytearray(8)
 sols=bytearray(4)
 
-# This is a performance hack to replace 7 if statements by a table lookup
-# when mapping colums to an 0-6 value
+# This is a performance hack to replace 8 if statements by a table lookup
+# when mapping colums to an 0-7 value
 colmapping = bytearray(256)
-for i in range(0,6):
+for i in range(0,7):
     colmapping[1<<i]=i
     
 
