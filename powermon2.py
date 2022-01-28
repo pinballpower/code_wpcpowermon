@@ -5,29 +5,23 @@ import rp2
 
 # IOs on the Pico:
 # Data:      0-7
-# Triacs:      8
-# Sol1:        9
-# Sol3:       10
-# Sol4:       11
-# Sol2:       12
-# Lamp cols:  13
-# Lamp rows:  14
-# Zero cross: 15
+# Sol1:        8
+# Sol3:        9
+# Sol4:       10
+# Sol2:       11
+# Lamp cols:  12
+# Lamp rows:  13
+# Zero cross: 14
 
 # Pins as constants
-TRIACS=const(1)
-SOL1=const(2)
-SOL3=const(4)
-SOL4=const(8)
-SOL2=const(16)
-LCOL=const(32)
-LROW=const(64)
-ZEROCROSS=const(128)
+SOL1=const(1)
+SOL3=const(2)
+SOL4=const(4)
+SOL2=const(8)
+LCOL=const(16)
+LROW=const(32)
+ZEROCROSS=const(64)
 
-# Wait for a low/high change on GPIO8-14
-# As the "wait" command can only wait for a single pin, we need to poll the stat
-# of 8 pin here and then check if these are zero/non-zero
-#
 # Normally all pins are high. When new data needs to be fetch, one of the pins will go
 # to low for about 400ns and the data will fetch on the raising edge.
 # This code first waits for all pins to be high, then waits for something that goes to low
@@ -41,7 +35,7 @@ ZEROCROSS=const(128)
 def read_data():
     wrap_target()
     wait(1, irq, 0)
-    in_(pins,15)
+    in_(pins,14)
     push()
     wrap()
 
@@ -52,14 +46,14 @@ def wait_clock():
 
     label ("allhigh")        # Wait until one of the signals changes to low
     mov(isr,invert(null))    # Reset ISR shift counter, set all bits to 1
-    in_(pins,7)              # Read 7 bits
+    in_(pins,6)              # Read 7 bits
     mov(x,invert(isr))       # move these 8 bits (and the other 24) to X
     jmp(x_dec, "allhigh")    # if X is zero, loop again
     mov(isr,x)
 
     label("isnotzero")       # Now wait until it goes back to H again (should take only 250ns) 
     mov(isr,invert(null))    # Reset ISR shift counter, set all bits to 1
-    in_(pins,7)              # Read 7 bits
+    in_(pins,6)              # Read 7 bits
     mov(x,invert(isr))       # move these 7 bits to X and invert it
     jmp(not_x, "isnotzero")  # if X is not zero, try again
 
@@ -81,10 +75,10 @@ print ("State machines started")
 lights = bytearray(8)
 sols=bytearray(4)
 
-# This is a performance hack to replace 8 if statements by a table lookup
-# when mapping colums to an 0-7 value
+# This is a performance hack to replace 7 if statements by a table lookup
+# when mapping colums to an 0-6 value
 colmapping = bytearray(256)
-for i in range(0,7):
+for i in range(0,6):
     colmapping[1<<i]=i
     
 
@@ -137,8 +131,6 @@ while running:
         if data != sols[3]:
             sols[3]=data
             sols_updated=True
-    elif (address==TRIACS):
-        pass
     else:
         print("Ooops, unknown address ",address)
     
