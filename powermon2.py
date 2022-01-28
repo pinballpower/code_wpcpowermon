@@ -2,6 +2,8 @@ import machine
 import utime
 import rp2
 
+# IOs on the Pico:
+# Data:      0-7
 # Triacs:      8
 # Sol1:        9
 # Sol3:       10
@@ -11,7 +13,7 @@ import rp2
 # Lamp rows:  14
 # Zero cross: 15
 
-# Wait for a low/high change on GPIO8-15
+# Wait for a low/high change on GPIO8-14
 # As the "wait" command can only wait for a single pin, we need to poll the stat
 # of 8 pin here and then check if these are zero/non-zero
 #
@@ -21,26 +23,36 @@ import rp2
 # When it goes to low, the data will be pushed. It then waits for the raising edge and
 # sends an IRQ to inform the data reader process to read the data
 #
+# We do not process the zerocrossing signal here as it is completely independent from the
+# clocks, active high and overlapping. This has to be sampled completely independent.
+#
+@rp2.asm_pio()
+def read_data():
+    wrap_target()
+    wait(1, irq, 0)
+    in_(pins,15)
+    push()
+    wrap()
+
+
 @rp2.asm_pio()
 def wait_clock():
-    mov (y, null)
     wrap_target()
-    #irq(0)
-    label ("allhigh")
-    mov(isr,invert(null))    # Reset ISR shift counter
-    in_(pins,1)              # Read 8 bits
+
+    label ("allhigh")        # Wait until one of the signals changes to low
+    mov(isr,invert(null))    # Reset ISR shift counter, set all bits to 1
+    in_(pins,7)              # Read 7 bits
     mov(x,invert(isr))       # move these 8 bits (and the other 24) to X
-    jmp(x_dec, "allhigh")
+    jmp(x_dec, "allhigh")    # if X is zero, loop again
     mov(isr,x)
 
-    label("isnotzero")
-    mov(isr,invert(null))    # Reset ISR shift counter
-    in_(pins,1)   # Read 8 bits
-    mov(x,invert(isr))    # move these 8 bits to X
-    jmp(not_x, "isnotzero") # if X is not zero, try again
-    mov(isr,x)
-    push()
-    irq(0)
+    label("isnotzero")       # Now wait until it goes back to H again (should take only 250ns) 
+    mov(isr,invert(null))    # Reset ISR shift counter, set all bits to 1
+    in_(pins,7)              # Read 7 bits
+    mov(x,invert(isr))       # move these 7 bits to X and invert it
+    jmp(not_x, "isnotzero")  # if X is not zero, try again
+
+    irq(0)                   # signal the data reader machine to read the data on the bus
     
     wrap()
 
@@ -49,9 +61,12 @@ c=0
 
 counters=[0,0,0,0,0,0,0,0,0]
     
-clockmachine = rp2.StateMachine(0, wait_clock, in_base=machine.Pin(13))
+clockmachine = rp2.StateMachine(0, wait_clock, in_base=machine.Pin(8))
 clockmachine.active(1)
-#clockmachine.irq(counter) #Set the IRQ handler
+
+datamachine = rp2.StateMachine(1, read_data, in_base=machine.Pin(0))
+datamachine.active(1)
+
 
 print ("State machine started")
 
@@ -70,7 +85,11 @@ while running:
     lights_updates=False
     sols_updated=False
     
-    address=clockmachine.get()
+    # address=clockmachine.get()
+    pindata = ~ datamachine.get()
+    data=pindata & 0xff
+    address=(pindata >> 8) & 0x7f
+    
     c+=1
     if address != 0:
         x=address
