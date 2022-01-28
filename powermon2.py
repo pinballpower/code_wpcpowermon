@@ -1,3 +1,4 @@
+from micropython import const
 import machine
 import utime
 import rp2
@@ -12,6 +13,16 @@ import rp2
 # Lamp cols:  13
 # Lamp rows:  14
 # Zero cross: 15
+
+# Pins as constants
+TRIACS=const(1)
+SOL1=const(2)
+SOL3=const(4)
+SOL4=const(8)
+SOL2=const(16)
+LCOL=const(32)
+LROW=const(64)
+ZEROCROSS=const(128)
 
 # Wait for a low/high change on GPIO8-14
 # As the "wait" command can only wait for a single pin, we need to poll the stat
@@ -59,19 +70,23 @@ def wait_clock():
 
 c=0
 
-counters=[0,0,0,0,0,0,0,0,0]
-    
 clockmachine = rp2.StateMachine(0, wait_clock, in_base=machine.Pin(8))
 clockmachine.active(1)
 
 datamachine = rp2.StateMachine(1, read_data, in_base=machine.Pin(0))
 datamachine.active(1)
 
-
-print ("State machine started")
+print ("State machines started")
 
 lights = bytearray(8)
 sols=bytearray(4)
+
+# This is a performance hack to replace 8 if statements by a table lookup
+# when mapping colums to an 0-7 value
+colmapping = bytearray(256)
+for i in range(0,7):
+    colmapping[1<<i]=i
+    
 
 c=0
 t1=utime.ticks_ms()
@@ -79,39 +94,53 @@ start=utime.ticks_ms()
 running=True
 t2=0
 address=0
+lightscol=0
+lightsrow=0
+
+update_counter = 0
 
 while running:
-    was_updated=False
-    lights_updates=False
+    lights_updated=False
     sols_updated=False
     
-    # address=clockmachine.get()
     pindata = ~ datamachine.get()
     data=pindata & 0xff
     address=(pindata >> 8) & 0x7f
-    
-    c+=1
-    if address != 0:
-        x=address
-        if (x==1):
-            counters[0] += 1 
-        elif (x==2):
-            counters[1] += 1 
-        elif (x==4):
-            counters[2] += 1 
-        elif (x==8):
-            counters[3] += 1 
-        elif (x==16):
-            counters[4] += 1 
-        elif (x==32):
-            counters[5] += 1 
-        elif (x==64):
-            counters[6] += 1 
-        elif (x==128):
-            counters[7] += 1
-        else:
-            counters[8] += 1
-    address=0
+
+    if address==0:
+        # this should not happen
+        #print("Ooops, got a 0 address")
+        pass
+    elif (address==LCOL):
+        lightsrow = colmapping[data]
+    elif (address==LROW):
+        if lightsrow >=0:
+            if lights[lightsrow] != data:
+                lights[lightsrow] = data
+                lights_updated=True
+                # Make sure we ignore the next requests at the end of each
+                # column cycle
+                lightsrow = -1
+    elif (address==SOL1):
+        if data != sols[0]:
+            sols[0]=data
+            sols_updated=True
+    elif (address==SOL2):
+        if data != sols[1]:
+            sols[1]=data
+            sols_updated=True
+    elif (address==SOL3):
+        if data != sols[2]:
+            sols[2]=data
+            sols_updated=True
+    elif (address==SOL4):
+        if data != sols[3]:
+            sols[3]=data
+            sols_updated=True
+    elif (address==TRIACS):
+        pass
+    else:
+        print("Ooops, unknown address ",address)
     
     t2=utime.ticks_ms()
     diff=utime.ticks_diff(t2,start)
@@ -119,53 +148,18 @@ while running:
         print("10s running, aborting")
         running=False
     
-    if False:
-        c = c+1
-    #    print(i)
-        d=lightsmachine.get()
-        rowcode = (d & 0xff00) >> 8
-        r=-1
-        if rowcode==0b11111110:
-            r=0
-        elif rowcode==0b11111101:
-            r=1
-        elif rowcode==0b11111011:
-            r=2
-        elif rowcode==0b11110111:
-            r=3
-        elif rowcode==0b11101111:
-            r=4
-        elif rowcode==0b11011111:
-            r=5
-        elif rowcode==0b10111111:
-            r=6
-        elif rowcode==0b01111111:
-            r=7
-
-        if r != -1:
-            l=(~d & 0xff)
-            if lights[r] != l:
-                lights[r] = l
-                was_updated=True
-                lights_updates=True
-                
-    if was_updated:
-        pass
-        #print("Lights: ",lights)
-        #print("Solenoids: ", sols)
+    # Debug code
+    if lights_updated:
+    #    print("Lights: ",lights)
+        update_counter += 1
 
     if sols_updated:
         print("Solenoids: ", sols)
+        
+
+print(update_counter)
+    
              
-    if c>=1000:
-        t2=utime.ticks_ms()
-        diff=utime.ticks_diff(t2,t1)
-        f=1000000.0/diff
-        print(f)
-        c=0
-        t1=t2
-        
-print(counters);
-        
 clockmachine.active(0)
+datamachine.active(0)
       
