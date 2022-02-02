@@ -26,6 +26,14 @@ First the column is set (only one bit on the data bus is set), next the row data
 
 ![Lamp matrix signals](rowcol.png)
 
+## GI 
+
+General illumination is handled differently. The Power driver boards sets/resets the ZEROCROSS address to signal to the board. Based on this the MPU turns on (or doesn't) the
+TRIACs after some time. It implements a triac phase control that allows to set different brightness levels on each of the TRIAC channels.
+There is a maxmimum of 5 TRIACS on WPC. This has been reduced to 3 on WPC-95. 
+To detect the brightness level, the time between the falling ZEROCROSS edge and the TRIAC set command is needed. The lower the value, the higher the brightness.
+WPC implements 8 brightness levels.
+
 
 ## Reading data
 
