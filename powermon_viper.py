@@ -35,7 +35,9 @@ ZEROCROSS=const(128)
 
 # Global variables
 update_counter=0
-max_fifo=0
+
+max_fifo=int(0)
+
 overflow=0
 address_errors=0
 
@@ -54,7 +56,7 @@ if DEBUG:
 
 
 lights = bytearray(8)
-solenoids=bytearray(4)
+solenoids = bytearray(4)
 
 running=False
 finished=True
@@ -121,13 +123,22 @@ def wait_clock():
     
     wrap()
     
-@micropython.native
+def set_max_fifo(m):
+    global max_fifo
+    global overflow
+    if m == 8:
+        # If the queue is completely filled, there is most likely an overflow
+        # We can't be sure at the state machine will just block but it's a bad sign
+        overflow = 1
+    max_fifo=m
+    
+@micropython.viper
 def updateloop():
-    global update_counter
+    # global update_counter
     global finished
     global max_fifo
     global overflow
-    global address_errors
+    # global address_errors
     if DEBUG:
         global cols_detected
         global rows_detected
@@ -141,22 +152,25 @@ def updateloop():
     llock =  light_lock
     slock =  solenoid_lock
     
-    llights = lights
-    lsolenoids = solenoids
+    llights = ptr8(lights)
+    lsolenoids = ptr8(solenoids)
 
     # This is a performance hack to replace 8 if statements by a table lookup
     # when mapping colums to an 0-7 value
-    colmapping = bytearray(256)
+    colmapping = ptr8(bytearray(256))
     for i in range(0,255):
         colmapping[i] = -1
     for i in range(0,7):
         colmapping[1<<i]=i
     
-    pindata2=0
-    errors=0
+    pindata=int(0)
+    fdata=int(0)
+    lmax_fifo=int(0)
+    update_counter=int(0)
+    address_errors=int(0)
     
-    lightscol=0
-    lightsrow=0
+    lightscol=int(0)
+    lightsrow=int(0)
     
     i=0
     
@@ -165,7 +179,7 @@ def updateloop():
         lights_updated=0
         solenoids_updated=0
         
-        fdata=datamachine.rx_fifo()
+        fdata=int(datamachine.rx_fifo())
         if not fdata:
             continue
         
@@ -173,15 +187,12 @@ def updateloop():
             fifo_count += 1
             fifo_sum += fdata
         
-        if fdata > max_fifo:
-            max_fifo=fdata
-            if fdata == 8:
-                # If the queue is completely filled, there is most likely an overflow
-                # We can't be sure at the state machine will just block but it's a bad sign
-                overflow = 1
+        if fdata > lmax_fifo:
+            lmax_fifo=fdata
+            set_max_fifo(lmax_fifo)
 
             
-        d = datamachine.get()
+        d = int(datamachine.get())
         pindata = d & 0x7fff
             
         update_counter += 1
@@ -197,7 +208,7 @@ def updateloop():
                     llock.acquire()
                     llights[lightscol] = data
                     llock.release()
-                    lights_updated=True
+                    lights_updated=1
             else:
                 continue
             lightscol = -1
@@ -220,25 +231,25 @@ def updateloop():
                 slock.acquire()
                 lsolenoids[0]=data
                 slock.release()
-                solenoids_updated=True
+                solenoids_updated=1
         elif (address==SOL2):
             if data != lsolenoids[1]:
                 slock.acquire()
                 lsolenoids[1]=data
                 slock.release()
-                solenoids_updated=True
+                solenoids_updated=1
         elif (address==SOL3):
             if data != lsolenoids[2]:
                 slock.acquire()
                 lsolenoids[2]=data
                 slock.release()
-                solenoids_updated=True
+                solenoids_updated=1
         elif (address==SOL4):
             if data != lsolenoids[3]:
                 slock.acquire()
                 lsolenoids[3]=data
                 slock.release()
-                solenoids_updated=True
+                solenoids_updated=1
         elif (address==TRIACS):
             pass
         elif address==0:

@@ -1,4 +1,4 @@
-from powermon import PowerMonitor
+from powermon_viper import PowerMonitor
 
 DEBUG=const(0)
 
