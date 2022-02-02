@@ -36,7 +36,7 @@ As the bus is designed to directly drive Flip-Flops, the correct way is as follo
 - Wait until an address line goes to 0, read the address
 - Wait until this address line goes back to 1, read the data
 
-### Simplified way
+### Simplified way (used in this project)
 
 The data transfers on the bus always seem to take around 400ms. I haven't seen any other types in logic analyser traces. Therefore with a hardware that just listens on the bus, the following method will also work
 - Wait until an address line goes to 0
