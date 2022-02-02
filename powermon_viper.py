@@ -4,6 +4,7 @@ import utime
 import rp2
 import _thread
 from array import array
+import machine
 
 # IOs on the Pico:
 # Data:      0-7
@@ -48,6 +49,12 @@ solenoid_lock = _thread.allocate_lock()
 if DEBUG:
     DEBUGSIZE = const(40)
     debugarray = [0]*DEBUGSIZE
+    fifo_count = 0
+    fifo_sum = 0
+    rows_detected = 0
+    cols_detected = 0
+    zc_detected = 0
+    triacs_detected = 0 
 
 
 lights = bytearray(8)
@@ -59,7 +66,7 @@ finished=True
 # State machines
 clockmachine = 0
 datamachine = 0
-lightmachine = 0
+zcmachine = 0
 
 # callback functions for detected changes
 lamp_notify = 0
@@ -78,7 +85,7 @@ solenoid_notify = 0
 # We do not process the zerocrossing signal here as it is completely independent from the
 # clocks, active high and overlapping. This has to be sampled completely independent.
 
-DATABITS=const(16)
+DATABITS=const(15)
 @rp2.asm_pio(autopush=True,
              push_thresh=DATABITS,
              fifo_join=rp2.PIO.JOIN_RX,
@@ -101,7 +108,7 @@ def wait_clock():
 
     label ("allhigh")        # Wait until one of the signals changes to low
     mov(isr,invert(null))    # Reset ISR shift counter, set all bits to 1
-    in_(pins,CTLBITS)              # Read 7 bits
+    in_(pins,CTLBITS)        # Read 7 bits
     mov(x,invert(isr))       # move these 8 bits (and the other 24) to X
     jmp(x_dec, "allhigh")    # if X is zero, loop again
     mov(isr,x)
@@ -109,14 +116,27 @@ def wait_clock():
 
     label("isnotzero")       # Now wait until it goes back to H again (should take only 250ns) 
     mov(isr,invert(null))    # Reset ISR shift counter, set all bits to 1
-    in_(pins,CTLBITS)              # Read 7 bits
+    in_(pins,CTLBITS)        # Read 7 bits
     mov(x,invert(isr))       # move these 7 bits to X and invert it
     jmp(not_x, "isnotzero")  # if X is not zero, try again
     
-    nop() [25]               # Wait around 200ns
+    nop() [31]               # Wait around 250ns (at 125MHz, a command runs in 8ns)
+                             # This still works if the Pi Pico is overclocked at 250Mhz. In this
+                             # case, the data will be samples about 130ns after the falling edge
+                             # which still seems to work fine
     irq(0)                   # signal the data reader machine to read the data on the bus
     
     wrap()
+ 
+@rp2.asm_pio()
+def wait_zerocrossing():
+    wrap_target()
+    wait(1,pin,15) [10]
+    wait(0,pin,15)
+    in_(pins,16)
+    push()
+    wrap()
+    
     
 def set_max_fifo(m):
     global max_fifo
@@ -139,14 +159,25 @@ def updateloop():
     global finished
     
     if DEBUG:
-        fifo_count = int(0)
-        fifo_sum = int(0)
-        rows_detected = int(0)
-        cols_detected = int(0)
+        global rows_detected
+        global cols_detected
+        global triacs_detected
+        global zc_detected
+        global fifo_count
+        global fifo_sum
+        
+        lfifo_count = int(0)
+        lfifo_sum = int(0)
+        lrows_detected = int(0)
+        lcols_detected = int(0)
+        ltriacs_detected = int(0)
+        lzc_detected = int(0)
 
     # Cache some global objects
     llock =  light_lock
     slock =  solenoid_lock
+    ldatamachine = datamachine
+    lzcmachine = zcmachine
     
     llights = ptr8(lights)
     lsolenoids = ptr8(solenoids)
@@ -161,6 +192,8 @@ def updateloop():
     
     pindata=int(0)
     fdata=int(0)
+    zc=int(0)
+    lfifo_count=int(0)
     lmax_fifo=int(0)
     lupdate_counter=int(0)
     
@@ -174,31 +207,46 @@ def updateloop():
         lights_updated=0
         solenoids_updated=0
         
-        fdata=int(datamachine.rx_fifo())
+        # Check zero crossing first
+        fdata=int(lzcmachine.rx_fifo())
+        if fdata:
+            # Zerocrossing detected, just clean queue, data
+            # are not interesting
+            lzcmachine.get()
+            if DEBUG:
+                lzc_detected += 1
+                zc_detected=lzc_detected
+        
+        fdata=int(ldatamachine.rx_fifo())
         if not fdata:
             continue
         
         if DEBUG:
-            fifo_count += 1
-            fifo_sum += fdata
+            lfifo_count += 1
+            lfifo_sum += fdata
+            fifo_count=lfifo_count
+            fifo_sum=lfifo_sum
         
         if fdata > lmax_fifo:
             lmax_fifo=fdata
             set_max_fifo(lmax_fifo)
 
             
-        d = int(datamachine.get())
+        d = int(ldatamachine.get())
         pindata = d & 0x7fff
             
         lupdate_counter += 1
         
         data=pindata & 0xff
-        address=(pindata >> 8) & 0x7f
+        address=pindata >> 8
+        zc=address>>7
+        address=address & 0x7f
  
         if address==LROW:
             if lightscol >=0:
                 if DEBUG:
-                    rows_detected += 1
+                    lrows_detected += 1
+                    rows_detected=lrows_detected
                 if llights[lightscol] != data:
                     llock.acquire()
                     llights[lightscol] = data
@@ -219,7 +267,8 @@ def updateloop():
                 lightscol = -1
                 
             if DEBUG:
-                cols_detected += 1
+                lcols_detected += 1
+                cols_detected=lcols_detected
 
         elif (address==SOL1):
             if data != lsolenoids[0]:
@@ -246,6 +295,9 @@ def updateloop():
                 slock.release()
                 solenoids_updated=1
         elif (address==TRIACS):
+            if DEBUG:
+                ltriacs_detected += 1
+                triacs_detected=ltriacs_detected
             pass
         elif address==0:
             # this should not happen
@@ -282,14 +334,18 @@ class PowerMonitor():
     def __init__(self, gpio_base=0, statemachine_base=0):
         global clockmachine
         global datamachine
-        global lightmachine
+        global zcmachine
         
         clockmachine = rp2.StateMachine(statemachine_base,
                                         wait_clock,
                                         in_base=machine.Pin(gpio_base+8))
 
-        datamachine = rp2.StateMachine(statemachine_base+2,
+        datamachine = rp2.StateMachine(statemachine_base+1,
                                        read_data,
+                                       in_base=machine.Pin(gpio_base))
+        
+        zcmachine = rp2.StateMachine(statemachine_base+2,
+                                       wait_zerocrossing,
                                        in_base=machine.Pin(gpio_base))
         
         self.monitor_thread=None
@@ -328,6 +384,7 @@ class PowerMonitor():
         
         datamachine.active(1)
         clockmachine.active(1)
+        zcmachine.active(1)
 
         self.monitor_thread=_thread.start_new_thread(updateloop,())
         
@@ -347,7 +404,7 @@ class PowerMonitor():
         finished=True
             
         clockmachine.active(0)
-        lightmachine.active(0)
+        zcmachine.active(0)
         datamachine.active(0)
             
         self.monitor_thread=None
@@ -357,12 +414,24 @@ class PowerMonitor():
             
     def get_stats(self):
         
-        return {
-            "max_fifo": max_fifo,
-            "update_counter": update_counter,
-            "overflow": overflow,
-            "address_errors": address_errors,
-            }
+        if DEBUG:
+            return {
+                "max_fifo": max_fifo,
+                "update_counter": update_counter,
+                "overflow": overflow,
+                "address_errors": address_errors,
+                "rows_detected": rows_detected,
+                "cols_detected": cols_detected,
+                "zc_detected": zc_detected,
+                "triacs_detected": triacs_detected
+                }
+        else:
+            return {
+                "max_fifo": max_fifo,
+                "update_counter": update_counter,
+                "overflow": overflow,
+                "address_errors": address_errors,
+                }
     
     def get_overflow(self):
         return overflow
@@ -370,4 +439,5 @@ class PowerMonitor():
     def reset_overflow(self):
         global overflow
         overflow=0
+
 
