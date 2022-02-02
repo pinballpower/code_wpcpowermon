@@ -18,8 +18,8 @@ from array import array
 
 DEMO=const(0)
 
-# 0: no verbose output, 1: some logs, 2: more verbose logs 
-DEBUG=const(1)
+# 0: no verbose output, 1: some logs, 2: more verbose logs
+DEBUG=const(0)
 DEBUG_NONE=const(0)
 DEBUG_SOME=const(1)
 DEBUG_VERBOSE=const(2)
@@ -40,13 +40,17 @@ max_fifo=0
 overflow=0
 address_errors=0
 
+# Thread synchronisation
+light_lock    =  _thread.allocate_lock()
+solenoid_lock = _thread.allocate_lock()
+
 if DEBUG:
     cols_detected=0
     rows_detected=0
     fifo_count=0
     fifo_sum=0
     
-    DEBUGSIZE = const(2000)
+    DEBUGSIZE = const(40)
     debugarray = [0]*DEBUGSIZE
 
 
@@ -89,12 +93,18 @@ for i in range(0,7):
 # clocks, active high and overlapping. This has to be sampled completely independent.
 
 DATABITS=const(15)
-@rp2.asm_pio(autopush=True, push_thresh=DATABITS, fifo_join=rp2.PIO.JOIN_RX, set_init=rp2.PIO.OUT_LOW)
+@rp2.asm_pio(autopush=True,
+             push_thresh=DATABITS,
+             fifo_join=rp2.PIO.JOIN_RX,
+             set_init=rp2.PIO.OUT_LOW,
+             in_shiftdir=rp2.PIO.SHIFT_LEFT
+             )
 def read_data():
     wrap_target()
     wait(1, irq, 0)
     mov(x,invert(pins))    # To save post-processing time, invert pins in the state machine
     in_(x,DATABITS)
+    
     wrap()
 
 
@@ -135,6 +145,12 @@ def updateloop():
         global col0_detected
         global colother_detected
         global debugarray
+        global fifo_count
+        global fifo_sum
+
+    # Store global locks in local variables to speed up things
+    llock =  light_lock
+    slock =  solenoid_lock
     
     pindata2=0
     errors=0
@@ -153,6 +169,10 @@ def updateloop():
         if not fdata:
             continue
         
+        if DEBUG:
+            fifo_count += 1
+            fifo_sum += fdata
+        
         if fdata > max_fifo:
             max_fifo=fdata
             if fdata == 8:
@@ -160,11 +180,23 @@ def updateloop():
                 # We can't be sure at the state machine will just block but it's a bad sign
                 overflow = 1
         
+#         if pindata2:
+#             d = pindata2
+#             pindata2 = 0
+#         else:
+#             d = datamachine.get()
+#             if DEBUG:
+#                 debugarray[i]=d
+#                 i+=1
+#                 
+#             pindata = d & 0x7fff
+#             pindata2 = pindata >> DATABITS
+            
         d = datamachine.get()
         pindata = d & 0x7fff
             
         update_counter += 1
-    
+        
         data=pindata & 0xff
         address=(pindata >> 8) & 0x7f
  
@@ -173,7 +205,9 @@ def updateloop():
                 if DEBUG:
                     rows_detected += 1
                 if lights[lightscol] != data:
+                    llock.acquire()
                     lights[lightscol] = data
+                    llock.release()
                     lights_updated=True
             else:
                 continue
@@ -194,19 +228,27 @@ def updateloop():
 
         elif (address==SOL1):
             if data != solenoids[0]:
+                slock.acquire()
                 solenoids[0]=data
+                slock.release()
                 solenoids_updated=True
         elif (address==SOL2):
             if data != solenoids[1]:
+                slock.acquire()
                 solenoids[1]=data
+                slock.release()
                 solenoids_updated=True
         elif (address==SOL3):
             if data != solenoids[2]:
+                slock.acquire()
                 solenoids[2]=data
+                slock.release()
                 solenoids_updated=True
         elif (address==SOL4):
             if data != solenoids[3]:
+                slock.acquire()
                 solenoids[3]=data
+                slock.release()
                 solenoids_updated=True
         elif (address==TRIACS):
             pass
@@ -267,6 +309,19 @@ class PowerMonitor():
         global solenoid_notify
         solenoid_notify = notify_func
         
+    def get_lights(self):
+        light_lock.acquire()
+        res=int.from_bytes(lights,'big')
+        light_lock.release()
+        return res
+        
+    def get_solenoids(self):
+        light_lock.acquire()
+        res=int.from_bytes(solenoids,'big')
+        light_lock.release()
+        return res
+        
+        
     def start(self):
         global running
         global finished
@@ -312,7 +367,8 @@ if DEMO:
 
     s_prev = 0
     s_changed = int.from_bytes(solenoids,'big') # will be 0 at this stage
-
+    
+    pm = None # The power monitor object will be initialized later
 
     lamp_notifications = 0
     solenoid_notifications = 0 
@@ -324,7 +380,7 @@ if DEMO:
         
         lamp_notifications += 1
         
-        l = int.from_bytes(lights,'big') # will be 0 at this stage
+        l = pm.get_lights()
         
         ldiff = l_prev ^ l
         
@@ -336,7 +392,8 @@ if DEMO:
         global solenoid_notifications
         global s_prev
         global s_changed
-        
+
+
         solenoid_notifications += 1
         
         s = int.from_bytes(solenoids,'big') # will be 0 at this stage
@@ -377,10 +434,23 @@ if DEMO:
                     
         else:
             pass
+        
+    def dump_debugarray_plain():
+        if DEBUG:
+            for i in range(0,DEBUGSIZE-1):
+                #d1 = debugarray[i] & 0x7fff
+                #d2 = debugarray[i] >> DATABITS
+                #print("{0:0>16b} {0:0>16b}".format(d1,d2))
+                
+                print("{0:0>32b}".format(debugarray[i]))
+
 
     def demo():
         global l_prev
         global max_fifo
+        global fifo_count
+        global fifo_sum
+        global pm
 
         i=0
         
@@ -398,9 +468,20 @@ if DEMO:
         pm.set_lamp_notify(lamp_notify_demo)
         pm.set_solenoid_notify(solenoid_notify_demo)
         
-        while i<100:
+        while i<10:
             
             print(i)
+            print("Max FIFO size:", max_fifo)
+            max_fifo=0
+            
+            if DEBUG:
+                if fifo_count > 0:
+                    print("Average FIFO size:", fifo_sum/fifo_count)
+                else:
+                    print("No data")
+                
+                fifo_sum=0
+                fifo_count=0
             
             i += 1        
             utime.sleep(1)
@@ -428,7 +509,7 @@ if DEMO:
         print("Solenoids changed: {0:0>32b}".format(s_changed))
         print("Final solenoids:   {0:0>32b}".format(int.from_bytes(solenoids,'big')))
         
-    #    dump_debugarray()
+        # dump_debugarray_plain()
 
     demo()
                  
