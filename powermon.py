@@ -16,8 +16,6 @@ from array import array
 # Lamp rows:  14
 # Zero cross: 15
 
-DEMO=const(1)
-
 # 0: no verbose output, 1: some logs, 2: more verbose logs
 DEBUG=const(0)
 DEBUG_NONE=const(0)
@@ -33,6 +31,7 @@ SOL2=const(16)
 LCOL=const(32)
 LROW=const(64)
 ZEROCROSS=const(128)
+
 
 # Global variables
 update_counter=0
@@ -132,7 +131,7 @@ def wait_clock():
     
     wrap()
     
- 
+@micropython.native
 def updateloop():
     global update_counter
     global finished
@@ -352,7 +351,8 @@ class PowerMonitor():
         return {
             "max_fifo": max_fifo,
             "update_counter": update_counter,
-            "overflow": overflow
+            "overflow": overflow,
+            "address_errors": address_errors,
             }
     
     def get_overflow(self):
