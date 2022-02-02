@@ -1,6 +1,10 @@
 - Reading data from the WPC power bus working
 - Parsing lamp rows/colums working and tested 
-- Parsing Solenoids implemented (still seems to be buggy)
+- Parsing Solenoids working and tested
+
+TODO
+- GI
+
 
 
 
