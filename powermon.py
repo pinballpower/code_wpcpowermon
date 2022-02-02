@@ -16,6 +16,8 @@ from array import array
 # Lamp rows:  14
 # Zero cross: 15
 
+DEMO=const(0)
+
 # 0: no verbose output, 1: some logs, 2: more verbose logs 
 DEBUG=const(1)
 DEBUG_NONE=const(0)
@@ -311,139 +313,141 @@ class PowerMonitor():
 
 ### Some demo code
             
-l_prev = 0
-l_changed = int.from_bytes(lights,'big') # will be 0 at this stage
-
-s_prev = 0
-s_changed = int.from_bytes(solenoids,'big') # will be 0 at this stage
-
-
-lamp_notifications = 0
-solenoid_notifications = 0 
-
-def lamp_notify_demo():
-    global lamp_notifications
-    global l_prev
-    global l_changed
-    
-    lamp_notifications += 1
-    
-    l = int.from_bytes(lights,'big') # will be 0 at this stage
-    
-    ldiff = l_prev ^ l
-    
-    l_changed = l_changed | ldiff
-    
-    l_prev=l
-    
-def solenoid_notify_demo():
-    global solenoid_notifications
-    global s_prev
-    global s_changed
-    
-    solenoid_notifications += 1
-    
-    return
-    
-    s = int.from_bytes(solenoids,'big') # will be 0 at this stage
-    
-    sdiff = s_prev ^ s
-    
-    s_changed = s_changed | sdiff
-    
-    s_prev=s
-
-def dump_debugarray():
-    if DEBUG:
-        prev_col=False
-        for i in range(0,DEBUGSIZE-1):
-            d=debugarray[i]
-            d2=d & 0xff
-            d1=d>>8
+if DEMO:
             
-            if d1==TRIACS:
-                s="Trcs"
-            elif d1==SOL1:
-                s="Sol1"
-            elif d1==SOL2:
-                s="Sol2"
-            elif d1==SOL3:
-                s="Sol1"
-            elif d1==SOL4:
-                s="Sol2"
-            elif d1==LCOL:
-                s="Lcol"
-                if d2 == 0x01:
-                    prev_col=True
-            elif d1==LROW:
-                s="Lrow"
-                if prev_col and d2 != 0:
-                    print("oops")
-                if prev_col and d2 != 0:
-                    print("yeahhh")
-            else:
-                s="????"
+    l_prev = 0
+    l_changed = int.from_bytes(lights,'big') # will be 0 at this stage
+
+    s_prev = 0
+    s_changed = int.from_bytes(solenoids,'big') # will be 0 at this stage
+
+
+    lamp_notifications = 0
+    solenoid_notifications = 0 
+
+    def lamp_notify_demo():
+        global lamp_notifications
+        global l_prev
+        global l_changed
+        
+        lamp_notifications += 1
+        
+        l = int.from_bytes(lights,'big') # will be 0 at this stage
+        
+        ldiff = l_prev ^ l
+        
+        l_changed = l_changed | ldiff
+        
+        l_prev=l
+        
+    def solenoid_notify_demo():
+        global solenoid_notifications
+        global s_prev
+        global s_changed
+        
+        solenoid_notifications += 1
+        
+        return
+        
+        s = int.from_bytes(solenoids,'big') # will be 0 at this stage
+        
+        sdiff = s_prev ^ s
+        
+        s_changed = s_changed | sdiff
+        
+        s_prev=s
+
+    def dump_debugarray():
+        if DEBUG:
+            prev_col=False
+            for i in range(0,DEBUGSIZE-1):
+                d=debugarray[i]
+                d2=d & 0xff
+                d1=d>>8
                 
-            if prev_col:
-                print("{0} {1:0>8b} ".format(s,d2))
-                
-            if d1==LROW:
-                prev_col=False
-    else:
-        pass
+                if d1==TRIACS:
+                    s="Trcs"
+                elif d1==SOL1:
+                    s="Sol1"
+                elif d1==SOL2:
+                    s="Sol2"
+                elif d1==SOL3:
+                    s="Sol1"
+                elif d1==SOL4:
+                    s="Sol2"
+                elif d1==LCOL:
+                    s="Lcol"
+                    if d2 == 0x01:
+                        prev_col=True
+                elif d1==LROW:
+                    s="Lrow"
+                    if prev_col and d2 != 0:
+                        print("oops")
+                    if prev_col and d2 != 0:
+                        print("yeahhh")
+                else:
+                    s="????"
+                    
+                if prev_col:
+                    print("{0} {1:0>8b} ".format(s,d2))
+                    
+                if d1==LROW:
+                    prev_col=False
+        else:
+            pass
 
-def demo():
-    global l_prev
-    global max_fifo
+    def demo():
+        global l_prev
+        global max_fifo
 
-    i=0
-    
-    pm = PowerMonitor()
-    pm.start()
-    utime.sleep(0.1)
-    # Read the initial lamp state
-    l_prev = int.from_bytes(lights,'big')
-    l_initial = l_prev
-    
-    # Read the initial solenoid state
-    s_prev = int.from_bytes(solenoids,'big')
-    s_initial = s_prev
-    
-    pm.set_lamp_notify(lamp_notify_demo)
-    pm.set_solenoid_notify(lamp_notify_demo)
-    
-    while i<100:
+        i=0
         
-        print(i)
+        pm = PowerMonitor()
+        pm.start()
+        utime.sleep(0.1)
+        # Read the initial lamp state
+        l_prev = int.from_bytes(lights,'big')
+        l_initial = l_prev
         
-        i += 1        
-        utime.sleep(1)
+        # Read the initial solenoid state
+        s_prev = int.from_bytes(solenoids,'big')
+        s_initial = s_prev
         
-    # pm.stop()
+        pm.set_lamp_notify(lamp_notify_demo)
+        pm.set_solenoid_notify(lamp_notify_demo)
+        
+        while i<100:
+            
+            print(i)
+            
+            i += 1        
+            utime.sleep(1)
+            
+        # pm.stop()
 
-    print("Events received from bus: ", update_counter)
-    print("Address errors: ",address_errors)
-    if overflow:
-        print("!!! Overflow detected !!!")
-    else:
-        print("No overflow detected")
+        print("Events received from bus: ", update_counter)
+        print("Address errors: ",address_errors)
+        if overflow:
+            print("!!! Overflow detected !!!")
+        else:
+            print("No overflow detected")
 
-    if DEBUG:
-        print("Columns detected: ",cols_detected)
-        print("Rows detected: ",rows_detected)
+        if DEBUG:
+            print("Columns detected: ",cols_detected)
+            print("Rows detected: ",rows_detected)
 
-    print("Lamp change notifications: ", lamp_notifications)
-    print("Initial lamps:     {0:0>64b}".format(l_initial))
-    print("Lamps changed:     {0:0>64b}".format(l_changed))
-    print("Final lamps:       {0:0>64b}".format(int.from_bytes(lights,'big')))
+        print("Lamp change notifications: ", lamp_notifications)
+        print("Initial lamps:     {0:0>64b}".format(l_initial))
+        print("Lamps changed:     {0:0>64b}".format(l_changed))
+        print("Final lamps:       {0:0>64b}".format(int.from_bytes(lights,'big')))
 
-    print("Solenoid change notifications: ", solenoid_notifications)
-    print("Initial solenoids: {0:0>32b}".format(s_initial,))
-    print("Solenoids changed: {0:0>32b}".format(s_changed))
-    print("Final solenoids:   {0:0>32b}".format(int.from_bytes(solenoids,'big')))
-    
-#    dump_debugarray()
+        print("Solenoid change notifications: ", solenoid_notifications)
+        print("Initial solenoids: {0:0>32b}".format(s_initial,))
+        print("Solenoids changed: {0:0>32b}".format(s_changed))
+        print("Final solenoids:   {0:0>32b}".format(int.from_bytes(solenoids,'big')))
+        
+    #    dump_debugarray()
 
-demo()
-             
+    demo()
+                 
       
