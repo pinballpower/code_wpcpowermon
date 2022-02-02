@@ -82,18 +82,11 @@ for i in range(0,7):
 # Normally all pins are high. When new data needs to be fetch, one of the pins will go
 # to low for about 400ns and the data will fetch on the raising edge.
 # This code first waits for all pins to be high, then waits for something that goes to low
-# When it goes to low, the data will be pushed. It then waits for the raising edge and
-# sends an IRQ to inform the data reader process to read the data
+# When it goes to low, the data will be pushed. It then waits 200ns and sends an IRQ to
+# inform the data reader process to read the data
 #
 # We do not process the zerocrossing signal here as it is completely independent from the
 # clocks, active high and overlapping. This has to be sampled completely independent.
-
-
-
-
-
-p5 = machine.Pin(20, machine.Pin.OUT)
-p6 = machine.Pin(21, machine.Pin.OUT)
 
 DATABITS=const(15)
 @rp2.asm_pio(autopush=True, push_thresh=DATABITS, fifo_join=rp2.PIO.JOIN_RX, set_init=rp2.PIO.OUT_LOW)
@@ -258,8 +251,7 @@ class PowerMonitor():
 
         datamachine = rp2.StateMachine(statemachine_base+2,
                                        read_data,
-                                       in_base=machine.Pin(gpio_base),
-                                       out_base=p5)
+                                       in_base=machine.Pin(gpio_base))
         
         self.monitor_thread=None
 
@@ -347,8 +339,6 @@ if DEMO:
         
         solenoid_notifications += 1
         
-        return
-        
         s = int.from_bytes(solenoids,'big') # will be 0 at this stage
         
         sdiff = s_prev ^ s
@@ -377,22 +367,14 @@ if DEMO:
                     s="Sol2"
                 elif d1==LCOL:
                     s="Lcol"
-                    if d2 == 0x01:
-                        prev_col=True
                 elif d1==LROW:
                     s="Lrow"
-                    if prev_col and d2 != 0:
-                        print("oops")
-                    if prev_col and d2 != 0:
-                        print("yeahhh")
                 else:
                     s="????"
                     
                 if prev_col:
                     print("{0} {1:0>8b} ".format(s,d2))
                     
-                if d1==LROW:
-                    prev_col=False
         else:
             pass
 
@@ -414,7 +396,7 @@ if DEMO:
         s_initial = s_prev
         
         pm.set_lamp_notify(lamp_notify_demo)
-        pm.set_solenoid_notify(lamp_notify_demo)
+        pm.set_solenoid_notify(solenoid_notify_demo)
         
         while i<100:
             
@@ -442,7 +424,7 @@ if DEMO:
         print("Final lamps:       {0:0>64b}".format(int.from_bytes(lights,'big')))
 
         print("Solenoid change notifications: ", solenoid_notifications)
-        print("Initial solenoids: {0:0>32b}".format(s_initial,))
+        print("Initial solenoids: {0:0>32b}".format(s_initial))
         print("Solenoids changed: {0:0>32b}".format(s_changed))
         print("Final solenoids:   {0:0>32b}".format(int.from_bytes(solenoids,'big')))
         
