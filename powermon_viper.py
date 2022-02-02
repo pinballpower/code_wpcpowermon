@@ -46,11 +46,6 @@ light_lock    =  _thread.allocate_lock()
 solenoid_lock = _thread.allocate_lock()
 
 if DEBUG:
-    cols_detected=0
-    rows_detected=0
-    fifo_count=0
-    fifo_sum=0
-    
     DEBUGSIZE = const(40)
     debugarray = [0]*DEBUGSIZE
 
@@ -83,7 +78,7 @@ solenoid_notify = 0
 # We do not process the zerocrossing signal here as it is completely independent from the
 # clocks, active high and overlapping. This has to be sampled completely independent.
 
-DATABITS=const(15)
+DATABITS=const(16)
 @rp2.asm_pio(autopush=True,
              push_thresh=DATABITS,
              fifo_join=rp2.PIO.JOIN_RX,
@@ -132,21 +127,22 @@ def set_max_fifo(m):
         overflow = 1
     max_fifo=m
     
+def found_address_error():
+    global address_errors
+    address_errors += 1
+    
+#def set_update_counter(new_value)
+    
 @micropython.viper
 def updateloop():
-    # global update_counter
+    global update_counter
     global finished
-    global max_fifo
-    global overflow
-    # global address_errors
+    
     if DEBUG:
-        global cols_detected
-        global rows_detected
-        global col0_detected
-        global colother_detected
-        global debugarray
-        global fifo_count
-        global fifo_sum
+        fifo_count = int(0)
+        fifo_sum = int(0)
+        rows_detected = int(0)
+        cols_detected = int(0)
 
     # Cache some global objects
     llock =  light_lock
@@ -166,8 +162,7 @@ def updateloop():
     pindata=int(0)
     fdata=int(0)
     lmax_fifo=int(0)
-    update_counter=int(0)
-    address_errors=int(0)
+    lupdate_counter=int(0)
     
     lightscol=int(0)
     lightsrow=int(0)
@@ -195,7 +190,7 @@ def updateloop():
         d = int(datamachine.get())
         pindata = d & 0x7fff
             
-        update_counter += 1
+        lupdate_counter += 1
         
         data=pindata & 0xff
         address=(pindata >> 8) & 0x7f
@@ -256,28 +251,30 @@ def updateloop():
             # this should not happen
             if DEBUG >= DEBUG_VERBOSE:
                 print("Ooops, got a 0 address: ",pindata)
-            address_errors += 1
+            found_address_error()
 
         else:
             # this should not happen
             if DEBUG >= DEBUG_VERBOSE:
                 print("Ooops, unknown address: ",pindata)
-            address_errors += 1
+            found_address_errors()
         
         if lights_updated:
-            update_counter += 1
+            lupdate_counter += 1
+            update_counter = lupdate_counter
             if lamp_notify:
                  lamp_notify()
             if DEBUG >= DEBUG_VERBOSE:
                 print("Lights: ",lights)
  
         if solenoids_updated:
-            update_counter += 1
+            lupdate_counter += 1
+            update_counter = lupdate_counter
             if solenoid_notify:
                  solenoid_notify()
             if DEBUG >= DEBUG_VERBOSE:
                 print("Solenoids: ",solenoids)
-            
+                
     finished=True
     
 class PowerMonitor():
@@ -373,4 +370,4 @@ class PowerMonitor():
     def reset_overflow(self):
         global overflow
         overflow=0
-    
+
