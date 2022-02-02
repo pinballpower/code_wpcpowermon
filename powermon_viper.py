@@ -18,7 +18,7 @@ import machine
 # Zero cross: 15
 
 # 0: no verbose output, 1: some logs, 2: more verbose logs
-DEBUG=const(0)
+DEBUG=const(1)
 DEBUG_NONE=const(0)
 DEBUG_SOME=const(1)
 DEBUG_VERBOSE=const(2)
@@ -54,7 +54,9 @@ if DEBUG:
     rows_detected = 0
     cols_detected = 0
     zc_detected = 0
-    triacs_detected = 0 
+    triacs_detected = 0
+    triac_min_time = 0 
+    triac_max_time = 0 
 
 
 lights = bytearray(8)
@@ -165,6 +167,8 @@ def updateloop():
         global zc_detected
         global fifo_count
         global fifo_sum
+        global triac_min_time
+        global triac_max_time
         
         lfifo_count = int(0)
         lfifo_sum = int(0)
@@ -172,6 +176,10 @@ def updateloop():
         lcols_detected = int(0)
         ltriacs_detected = int(0)
         lzc_detected = int(0)
+        ltriac_min_time = int(10000)
+        ltriac_max_time = int(0)
+        
+
 
     # Cache some global objects
     llock =  light_lock
@@ -181,6 +189,13 @@ def updateloop():
     
     llights = ptr8(lights)
     lsolenoids = ptr8(solenoids)
+    
+    triac0 = int(0)
+    triac1 = int(0)
+    triac2 = int(0)
+    triac3 = int(0)
+    triac4 = int(0)
+
 
     # This is a performance hack to replace 8 if statements by a table lookup
     # when mapping colums to an 0-7 value
@@ -200,6 +215,9 @@ def updateloop():
     lightscol=int(0)
     lightsrow=int(0)
     
+    zctime=int(0)
+    triac_set=int(0)
+    
     i=0
     
     while running:
@@ -212,6 +230,8 @@ def updateloop():
         if fdata:
             # Zerocrossing detected, just clean queue, data
             # are not interesting
+            zctime=int(utime.ticks_us())
+
             lzcmachine.get()
             if DEBUG:
                 lzc_detected += 1
@@ -298,6 +318,45 @@ def updateloop():
             if DEBUG:
                 ltriacs_detected += 1
                 triacs_detected=ltriacs_detected
+                
+                # Only do something if zero crossing is set
+                if zctime:
+                    ttime=int(utime.ticks_us())
+                    
+                    
+                    # Values are between 0 and about 10000 (0 to 10ms)
+                    diff=int(ttime-zctime)
+                    triac_set=0
+                    
+                    triacs = data # Store as we will need it when zero-cross is detected
+                    
+                    
+                    # WPC has 5 triacs, WPC95 only 3
+                    if (data & 0x01) and not triac0:
+                        triac0 = diff
+                        triac_set=1
+                    if (data & 0x02) and not triac1:
+                        triac1 = diff
+                        triac_set=1
+                    if (data & 0x04) and not triac2:
+                        triac1 = diff
+                        triac_set=1
+                    if (data & 0x08) and not triac3:
+                        triac1 = diff
+                        triac_set=1
+                    if (data & 0x10) and not triac4:
+                        triac1 = diff
+                        triac_set=1
+                        
+                    if DEBUG and triac_set:
+                        if diff < ltriac_min_time:
+                            ltriac_min_time=diff
+                            triac_min_time=ltriac_min_time
+                        if diff > ltriac_max_time:
+                            ltriac_max_time=diff
+                            triac_max_time=ltriac_max_time
+                        
+                
             pass
         elif address==0:
             # this should not happen
@@ -423,7 +482,9 @@ class PowerMonitor():
                 "rows_detected": rows_detected,
                 "cols_detected": cols_detected,
                 "zc_detected": zc_detected,
-                "triacs_detected": triacs_detected
+                "triacs_detected": triacs_detected,
+                "triac_min_time": triac_min_time,
+                "triac_max_time": triac_max_time,
                 }
         else:
             return {
@@ -440,4 +501,8 @@ class PowerMonitor():
         global overflow
         overflow=0
 
-
+if __name__ == '__main__':
+    pm=PowerMonitor()
+    pm.start()
+    utime.sleep(2)
+    print(pm.get_stats())
