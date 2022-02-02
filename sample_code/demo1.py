@@ -87,12 +87,12 @@ def demo():
     print("Lamp change notifications: ", lamp_notifications)
     print("Initial lamps:     {0:0>64b}".format(l_initial))
     print("Lamps changed:     {0:0>64b}".format(l_changed))
-    print("Final lamps:       {0:0>64b}".format(pm.get_lights(),'big'))
+    print("Final lamps:       {0:0>64b}".format(pm.get_lights()))
 
     print("Solenoid change notifications: ", solenoid_notifications)
     print("Initial solenoids: {0:0>32b}".format(s_initial))
     print("Solenoids changed: {0:0>32b}".format(s_changed))
-    print("Final solenoids:   {0:0>32b}".format(pm.get_solenoids(),'big'))
+    print("Final solenoids:   {0:0>32b}".format(pm.get_solenoids()))
 
 demo()
            
