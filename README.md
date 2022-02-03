@@ -10,6 +10,7 @@ change slightly or dramatically.
 - 4 LED output board: https://github.com/pinballpower/board_4led
 
 ## Documentation
+- API documentation: https://github.com/pinballpower/code_wpcpowermon/blob/main/doc/api.md
 - Current state of the project: https://github.com/pinballpower/code_wpcpowermon/blob/main/state.txt
 - WPC power driver protocol analysis: https://github.com/pinballpower/code_wpcpowermon/blob/main/protocol/protocol.md
 
