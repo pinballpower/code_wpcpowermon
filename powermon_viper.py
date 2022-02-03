@@ -43,7 +43,7 @@ overflow=0
 address_errors=0
 
 # Thread synchronisation
-light_lock    = _thread.allocate_lock()
+lamp_lock    = _thread.allocate_lock()
 solenoid_lock = _thread.allocate_lock()
 triac_lock    = _thread.allocate_lock()
 
@@ -60,7 +60,7 @@ if DEBUG:
     triac_max_time = 0 
 
 
-lights = bytearray(8)
+lamps = bytearray(8)
 solenoids = bytearray(4)
 TRIAC_NUM = const(5)
 gi_brightness = bytearray(TRIAC_NUM)
@@ -244,12 +244,12 @@ def updateloop():
 
 
     # Cache some global objects
-    llock =  light_lock
+    llock =  lamp_lock
     slock =  solenoid_lock
     ldatamachine = datamachine
     lzcmachine = zcmachine
     
-    llights = ptr8(lights)
+    llamps = ptr8(lamps)
     lsolenoids = ptr8(solenoids)
     lbrightness = ptr8(gi_brightness)
     
@@ -270,8 +270,8 @@ def updateloop():
     lmax_fifo=int(0)
     lupdate_counter=int(0)
     
-    lightscol=int(0)
-    lightsrow=int(0)
+    lampscol=int(0)
+    lampsrow=int(0)
     
     zctime=int(0)
     triac_set=int(0)
@@ -290,7 +290,7 @@ def updateloop():
     
     while running:
     
-        lights_updated=0
+        lamps_updated=0
         solenoids_updated=0
         
         # Check zero crossing first
@@ -336,28 +336,28 @@ def updateloop():
         address=address & 0x7f
  
         if address==A_LROW:
-            if lightscol >=0:
+            if lampscol >=0:
                 if DEBUG:
                     lrows_detected += 1
                     rows_detected=lrows_detected
-                if llights[lightscol] != data:
+                if llamps[lampscol] != data:
                     llock.acquire()
-                    llights[lightscol] = data
+                    llamps[lampscol] = data
                     llock.release()
-                    lights_updated=1
+                    lamps_updated=1
             else:
                 continue
-            lightscol = -1
+            lampscol = -1
             
         elif (address==A_LCOL):
             
             if data==0:
                 continue
             
-            lightscol = colmapping[data]
+            lampscol = colmapping[data]
             
-            if (lightscol < 0) or (lightscol > 7):
-                lightscol = -1
+            if (lampscol < 0) or (lampscol > 7):
+                lampscol = -1
                 
             if DEBUG:
                 lcols_detected += 1
@@ -410,13 +410,13 @@ def updateloop():
                 print("Ooops, unknown address: ",pindata)
             found_address_errors()
         
-        if lights_updated:
+        if lamps_updated:
             lupdate_counter += 1
             update_counter = lupdate_counter
             if lamp_notify:
                  lamp_notify()
             if DEBUG >= DEBUG_VERBOSE:
-                print("Lights: ",lights)
+                print("lamps: ",lamps)
  
         if solenoids_updated:
             lupdate_counter += 1
@@ -461,16 +461,16 @@ class PowerMonitor():
         global solenoid_notify
         solenoid_notify = notify_func
         
-    def get_lights(self):
-        light_lock.acquire()
-        res=int.from_bytes(lights,'big')
-        light_lock.release()
+    def get_lamps(self):
+        lamp_lock.acquire()
+        res=int.from_bytes(lamps,'big')
+        lamp_lock.release()
         return res
         
     def get_solenoids(self):
-        light_lock.acquire()
+        lamp_lock.acquire()
         res=int.from_bytes(solenoids,'big')
-        light_lock.release()
+        lamp_lock.release()
         return res
     
     def get_gi(self):
@@ -550,7 +550,7 @@ if __name__ == '__main__':
     pm.start()
     utime.sleep(2)
     print(pm.get_stats())
-    print("Lights:    {0:0>64b}".format(pm.get_lights()))
+    print("Lamps:     {0:0>64b}".format(pm.get_lamps()))
     print("Solenoids: {0:0>32b}".format(pm.get_solenoids()))
     print("GI:        {0:0>5X}".format(pm.get_gi()))
     
