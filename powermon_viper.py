@@ -24,14 +24,14 @@ DEBUG_SOME=const(1)
 DEBUG_VERBOSE=const(2)
 
 # Pins as constants
-TRIACS=const(1)
-SOL1=const(2)
-SOL3=const(4)
-SOL4=const(8)
-SOL2=const(16)
-LCOL=const(32)
-LROW=const(64)
-ZEROCROSS=const(128)
+A_TRIACS=const(1)
+A_SOL1=const(2)
+A_SOL3=const(4)
+A_SOL4=const(8)
+A_SOL2=const(16)
+A_LCOL=const(32)
+A_LROW=const(64)
+A_ZEROCROSS=const(128)
 
 
 # Global variables
@@ -43,8 +43,9 @@ overflow=0
 address_errors=0
 
 # Thread synchronisation
-light_lock    =  _thread.allocate_lock()
+light_lock    = _thread.allocate_lock()
 solenoid_lock = _thread.allocate_lock()
+triac_lock    = _thread.allocate_lock()
 
 if DEBUG:
     DEBUGSIZE = const(40)
@@ -61,6 +62,13 @@ if DEBUG:
 
 lights = bytearray(8)
 solenoids = bytearray(4)
+TRIAC_NUM = const(5)
+gi_brightness = bytearray(TRIAC_NUM)
+
+# Average GI over some cycles, must be a power of two to allow shifting to calculate average
+TRIAC_CYCLES = const(8)
+TRIAC_AVGBITS = const(3)
+
 
 running=False
 finished=True
@@ -133,8 +141,8 @@ def wait_clock():
 @rp2.asm_pio()
 def wait_zerocrossing():
     wrap_target()
-    wait(1,pin,15) [10]
-    wait(0,pin,15)
+    wait(0,pin,15) [10]
+    wait(1,pin,15)
     in_(pins,16)
     push()
     wrap()
@@ -154,6 +162,60 @@ def found_address_error():
     address_errors += 1
     
 #def set_update_counter(new_value)
+
+@micropython.viper
+def updatebrightness(timediff:int, triacdata: int, brightnessdata: ptr8, offset: int):
+    
+    # Convert time to brightness
+    # See https://github.com/bitfieldlabs/aggi/tree/master/scopes
+    # for examples
+    # This doesn't work perfectly, but good enough
+    if timediff == 0:
+        brightness = 8
+    elif timediff < 3300:
+        brightness = 6
+    elif timediff < 3500:
+        brightness = 5
+    elif timediff < 4800:
+        brightness = 4
+    elif timediff < 6000:
+        brightness = 2
+    elif timediff < 8000:
+        brightness = 1
+    else:
+        brightness=0
+    
+    # WPC has 5 triacs, WPC95 only 3
+    if (triacdata & 0x01) and not brightnessdata[offset+0]:
+        brightnessdata[offset+0] = brightness
+    if (triacdata & 0x02) and not brightnessdata[offset+1]:
+        brightnessdata[offset+1] = brightness
+    if (triacdata & 0x04) and not brightnessdata[offset+2]:
+        brightnessdata[offset+2] = brightness
+    if (triacdata & 0x08) and not brightnessdata[offset+3]:
+        brightnessdata[offset+3] = brightness
+    if (triacdata & 0x10) and not brightnessdata[offset+4]:
+        brightnessdata[offset+4] = brightness
+
+
+@micropython.viper
+def new_power_cycle(triacdata: int, brightnessdata: ptr8, averagearray: ptr8):
+    
+    sum=int(0)
+        
+    # Cleanup array and calculate averages over the previous cycle
+    for i in range(5):
+        sum=int(0)
+        for j in range(0,8):
+            offset=int(j*TRIAC_NUM+i)
+            sum += brightnessdata[offset]
+            brightnessdata[offset]=0
+        
+        averagearray[i]=sum >> TRIAC_AVGBITS
+        
+    
+    
+    updatebrightness(0, triacdata, brightnessdata, 0)
     
 @micropython.viper
 def updateloop():
@@ -189,12 +251,8 @@ def updateloop():
     
     llights = ptr8(lights)
     lsolenoids = ptr8(solenoids)
+    lbrightness = ptr8(gi_brightness)
     
-    triac0 = int(0)
-    triac1 = int(0)
-    triac2 = int(0)
-    triac3 = int(0)
-    triac4 = int(0)
 
 
     # This is a performance hack to replace 8 if statements by a table lookup
@@ -204,7 +262,7 @@ def updateloop():
         colmapping[i] = -1
     for i in range(0,7):
         colmapping[1<<i]=i
-    
+        
     pindata=int(0)
     fdata=int(0)
     zc=int(0)
@@ -218,7 +276,17 @@ def updateloop():
     zctime=int(0)
     triac_set=int(0)
     
+    brightness=int(0)
+    
+    # We store 10 triac cycles and caulculate the averegae over these to
+    # set the GI values as timing
+    max_brightnessoffset=int(TRIAC_NUM*TRIAC_CYCLES)
+    brightnessoffset = int(TRIAC_NUM*TRIAC_CYCLES)
+    brightnessdata = ptr8(bytearray(TRIAC_NUM*TRIAC_CYCLES))
+    triacdata = int(0)
+    
     i=0
+    
     
     while running:
     
@@ -231,12 +299,17 @@ def updateloop():
             # Zerocrossing detected, just clean queue, data
             # are not interesting
             zctime=int(utime.ticks_us())
-
             lzcmachine.get()
+            
             if DEBUG:
                 lzc_detected += 1
                 zc_detected=lzc_detected
-        
+            # Start storing data to the next slots in triacsarray
+            brightnessoffset += TRIAC_NUM
+            if brightnessoffset>=max_brightnessoffset:
+                new_power_cycle(triacdata, brightnessdata, lbrightness)
+                brightnessoffset = 0
+
         fdata=int(ldatamachine.rx_fifo())
         if not fdata:
             continue
@@ -262,7 +335,7 @@ def updateloop():
         zc=address>>7
         address=address & 0x7f
  
-        if address==LROW:
+        if address==A_LROW:
             if lightscol >=0:
                 if DEBUG:
                     lrows_detected += 1
@@ -276,7 +349,7 @@ def updateloop():
                 continue
             lightscol = -1
             
-        elif (address==LCOL):
+        elif (address==A_LCOL):
             
             if data==0:
                 continue
@@ -290,74 +363,41 @@ def updateloop():
                 lcols_detected += 1
                 cols_detected=lcols_detected
 
-        elif (address==SOL1):
+        elif (address==A_SOL1):
             if data != lsolenoids[0]:
                 slock.acquire()
                 lsolenoids[0]=data
                 slock.release()
                 solenoids_updated=1
-        elif (address==SOL2):
+        elif (address==A_SOL2):
             if data != lsolenoids[1]:
                 slock.acquire()
                 lsolenoids[1]=data
                 slock.release()
                 solenoids_updated=1
-        elif (address==SOL3):
+        elif (address==A_SOL3):
             if data != lsolenoids[2]:
                 slock.acquire()
                 lsolenoids[2]=data
                 slock.release()
                 solenoids_updated=1
-        elif (address==SOL4):
+        elif (address==A_SOL4):
             if data != lsolenoids[3]:
                 slock.acquire()
                 lsolenoids[3]=data
                 slock.release()
                 solenoids_updated=1
-        elif (address==TRIACS):
+        elif (address==A_TRIACS):
             if DEBUG:
                 ltriacs_detected += 1
                 triacs_detected=ltriacs_detected
                 
                 # Only do something if zero crossing is set
                 if zctime:
+                    triacdata=data
                     ttime=int(utime.ticks_us())
+                    updatebrightness(ttime-zctime, triacdata, brightnessdata, brightnessoffset)
                     
-                    
-                    # Values are between 0 and about 10000 (0 to 10ms)
-                    diff=int(ttime-zctime)
-                    triac_set=0
-                    
-                    triacs = data # Store as we will need it when zero-cross is detected
-                    
-                    
-                    # WPC has 5 triacs, WPC95 only 3
-                    if (data & 0x01) and not triac0:
-                        triac0 = diff
-                        triac_set=1
-                    if (data & 0x02) and not triac1:
-                        triac1 = diff
-                        triac_set=1
-                    if (data & 0x04) and not triac2:
-                        triac1 = diff
-                        triac_set=1
-                    if (data & 0x08) and not triac3:
-                        triac1 = diff
-                        triac_set=1
-                    if (data & 0x10) and not triac4:
-                        triac1 = diff
-                        triac_set=1
-                        
-                    if DEBUG and triac_set:
-                        if diff < ltriac_min_time:
-                            ltriac_min_time=diff
-                            triac_min_time=ltriac_min_time
-                        if diff > ltriac_max_time:
-                            ltriac_max_time=diff
-                            triac_max_time=ltriac_max_time
-                        
-                
-            pass
         elif address==0:
             # this should not happen
             if DEBUG >= DEBUG_VERBOSE:
@@ -431,6 +471,10 @@ class PowerMonitor():
         light_lock.acquire()
         res=int.from_bytes(solenoids,'big')
         light_lock.release()
+        return res
+    
+    def get_gi(self):
+        res=int.from_bytes(gi_brightness,'big')
         return res
         
         
@@ -506,3 +550,7 @@ if __name__ == '__main__':
     pm.start()
     utime.sleep(2)
     print(pm.get_stats())
+    print("Lights:    {0:0>64b}".format(pm.get_lights()))
+    print("Solenoids: {0:0>32b}".format(pm.get_solenoids()))
+    print("GI:        {0:0>5X}".format(pm.get_gi()))
+    
